@@ -13,15 +13,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from google.cloud import aiplatform
 import os
 import yaml
 import requests
 import subprocess
 import json
-import csv
-import io 
 import pandas as pd
+import pytz
+from googleapiclient.errors import HttpError 
 
 
 
@@ -41,9 +40,10 @@ project_id = config["project_id"]
 location = config["location"]
 app_id_manuals = config["app_id_manuals"]
 app_id_safety_reports = config["app_id_safety_reports"]
+dataset_id = config["dataset_id"]
+table_id = config["table_id"]
+bq_project_id = config["bq_project_id"]
 gcal_api_key = config["gcal_api_key"]
-workshop_gcal_ID = config["workshop_gcal_ID"]
-janeDoe_gcal_ID = config["janeDoe_gcal_ID"]
 johnSmith_gcal_ID = config["johnSmith_gcal_ID"]
 
 
@@ -200,71 +200,6 @@ def search_safety_reports(query):
 
 
 ########################################################################################################################
-# JOE SYSTEMS API 
-########################################################################################################################
-
-def joe_systems_determination(csv_file_path):
-    """
-    Uploads a CSV file to joe.systems and runs the product origin determination.
-
-    Args:
-        csv_file_path (str): The path to the CSV file.
-
-    Returns:
-        str: The query ID of the uploaded file, or an error message.
-    """
-    BASE_URL = "https://stage-app.joe.systems"
-    auth_response = joe_systems_authorize("", "")
-    if "security" in auth_response and "token" in auth_response["security"]:
-        token = auth_response["security"]["token"]
-        userid = auth_response["id"]
-    else:
-        return "Error: Could not authenticate with joe.systems API."
-
-    url = f"{BASE_URL}/api/v0.3/Determination/UploadAndRunDetermination?Userid={userid}"
-    headers = {"Authorization": f"Bearer {token}"}
-
-    try:
-        with open(csv_file_path, 'rb') as file:
-            files = {'uploadedFile': ('file.csv', file, 'text/csv')}
-            response = requests.post(url, headers=headers, files=files)
-            response.raise_for_status()  # Raise an exception for bad status codes
-            return response.text  # Return the query ID
-    except requests.exceptions.RequestException as e:
-        return f"Error: {e}"
-    except FileNotFoundError:
-        return f"Error: CSV file not found at {csv_file_path}"
-
-def joe_systems_authorize(login, password):
-    """
-    Authenticates with the joe.systems API and returns an auth token.
-
-    Args:
-        login (str): The user's login.
-        password (str): The user's password.
-
-    Returns:
-        dict: The API response containing the auth token, or an error message.
-    """
-    BASE_URL = "https://stage-app.joe.systems"
-    url = f"{BASE_URL}/api/v0.3/Authorization/External/Authorize?login={login}&password={password}"
-    headers = {"accept": "text/plain"}
-
-    try:
-        response = requests.get(url, headers=headers)
-        response.raise_for_status()
-        return response.json()
-    except requests.exceptions.RequestException as e:  
-        return f"Error: {e}"
-    
-
-# okok= joe_systems_determination('/Users/msubasioglu/Desktop/PhD/Code/ascm_raw/Files/guidebushBOM.csv')
-# print(okok)
-
-
-
-
-########################################################################################################################
 # GET EMPLOYEES FROM BIGQUERY TABLE  
 ########################################################################################################################
 
@@ -312,9 +247,8 @@ def get_employees():
         - Contact Number
         - Specialization
     """
-    dataset_id = 'ascm'
-    table_id = 'employees'
-    df = read_bigquery_table(project_id, dataset_id, table_id)
+
+    df = read_bigquery_table(bq_project_id, dataset_id, table_id)
     data = df.to_dict(orient='records')
     return data 
 
@@ -335,46 +269,77 @@ def get_upcoming_events(calendar_instance):
 
     Args:
         calendar_instance: A string identifier for the calendar. Valid options are:
-                            - 'workshop'
                             - 'Jane Doe'
-                            - 'John Smith'
 
     Returns:
         A list of event objects from the specified calendar, or a string error 
         message if the provided `calendar_instance` is invalid.
     """
 
-    if calendar_instance == 'workshop':
-        calendar_id = workshop_gcal_ID
-
-    elif calendar_instance == 'Jane Doe':
-        calendar_id = janeDoe_gcal_ID
-
-    elif calendar_instance == 'John Smith':
+    if calendar_instance == 'John Smith':
         calendar_id = johnSmith_gcal_ID
+
+    # elif calendar_instance == 'John Smith':
+    #     calendar_id = johnSmith_gcal_ID
 
     else: 
         return "You did not provide a valid calendar instance."
     
 
     API_KEY = gcal_api_key
+    service = build('calendar', 'v3', developerKey=API_KEY)
 
-    service = build('calendar', 'v3', developerKey=API_KEY)  # No credentials needed
+    now = datetime.datetime.utcnow().replace(tzinfo=datetime.timezone.utc)
+    time_min = now.isoformat()
+    time_max = (now + datetime.timedelta(days=7)).isoformat()
 
-    now = datetime.datetime.utcnow().isoformat() + 'Z'  # 'Z' indicates UTC time
-    time_max = (datetime.datetime.utcnow() + datetime.timedelta(days=30)).isoformat()  + 'Z'
+    try:
+        events_result = service.events().list(
+            calendarId=calendar_id, timeMin=time_min, timeMax=time_max,
+            singleEvents=True, orderBy='startTime').execute()
+        events = events_result.get('items',  [])
+    except HttpError as e:
+        print(f"Full error: {e}")  # This will show more detailed info.
+        if e.resp.status in [400, 401, 403, 404]:
+            print(e.resp)
+            print(e.uri)
+            print(e.content)
+        return "HTTP Error occured"
 
-    events_result = service.events().list(
-        calendarId=calendar_id, timeMin=now, timeMax=time_max,
-        singleEvents=True, orderBy='startTime').execute()
-    events = events_result.get('items',  [])
+    available_slots = []
+    for day in range(7):
+        start_time = now + datetime.timedelta(days=day)
+        end_time = start_time + datetime.timedelta(hours=23, minutes=59) # Check for slots until the end of each day. 
+        for hour in range(9, 18): # Check for slots from 9 AM to 6 PM. You can adjust this range.
+            slot_start = start_time.replace(hour=hour, minute=0, second=0, microsecond=0)
+            slot_end = slot_start + datetime.timedelta(hours=1)
+            
+            is_available = True
 
-    return events
+            for event in events:
+                event_start = datetime.datetime.fromisoformat(event['start'].get('dateTime', event['start'].get('date')).replace('Z', '+00:00'))
+                event_end = datetime.datetime.fromisoformat(event['end'].get('dateTime', event['end'].get('date')).replace('Z', '+00:00'))
+
+                if slot_start < event_end and slot_end > event_start:
+                    is_available = False
+                    break
+            
+            if is_available:
+                available_slots.append(slot_start.astimezone(pytz.timezone('CET')).strftime('%Y-%m-%d %H:%M'))  # Format the time string as YYYY-MM-DD HH:MM
+                if len(available_slots) == 3:
+                    return available_slots
+    
+    if not available_slots:
+        return "No available slots found in the next 7 days."
+
+    return available_slots
 
 
 
 
-
+########################################################################################################################
+# GET PREFERENTIAL STATUS 
+########################################################################################################################
 
 def get_preference_status() -> pd.DataFrame:
     """Analyzes a CSV file to determine the preferential status of materials.
@@ -393,54 +358,15 @@ def get_preference_status() -> pd.DataFrame:
 
     # Convert the DataFrame to a dictionary
     data = df.to_dict(orient='records')
-    
 
-    # with open(csv_path, 'r') as file:
-    #     csv_content = file.read()
-
-
-    # # Parse CSV content
-    # csv_reader = csv.reader(io.StringIO(csv_content))
-
-    # headers = next(csv_reader)
-    
-    # results = {}
-    # for row in csv_reader:
-    #     matnr, werks, gzolx, prefe, preda, code = row
-    #     matnr = matnr.strip()
-    #     gzolx = gzolx.strip()
-    #     prefe = prefe.strip()
-    #     preda = preda.strip()
-
-    #     if matnr not in results:
-    #         results[matnr] = []
-        
-    #     if prefe == "E":
-    #         eligibility = f"eligible for preferential treatment in region {gzolx} until {preda}."
-    #     elif prefe == "F":
-    #         eligibility = f"not eligible for preferential treatment (general region)."
-    #     else:
-    #         eligibility = f"has unspecified preference eligibility status."
-
-    #     results[matnr].append(f"Material {matnr} is {eligibility}")
-    
-    # # Generate summary response
-    # summary = ""
-    # for material, messages in results.items():
-    #     summary += f"Material {material}:\n"
-    #     summary += "\n".join(messages)
-    #     summary += "\n\n"
 
     return data
 
 
-# summary = analyze_preference_status() 
-# print(summary)
 
-
-
-
-
+########################################################################################################################
+# GET BILL OF MATERIALS  
+########################################################################################################################
 def getBOM() -> pd.DataFrame:
     """Reads a CSV file ('Files/guidebushBOM.csv') and returns a Pandas DataFrame.
 

@@ -133,8 +133,8 @@ class OrchestratorAgent(Agents.Agent):
         user_response = data[idx]['response']
 
         while execute_agent == "True" and i < max_loop:
-            print("\nInternal response: ", str(data[idx]))
-            print("\nNow executing agent.\n")
+            print("\n--------Internal response:-------- \n", str(data[idx]))
+            print("\n--------Now executing agent: ", target_agent, "--------\n")
 
             if target_agent:
             # Retrieve the target agent

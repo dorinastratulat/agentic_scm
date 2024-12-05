@@ -78,9 +78,10 @@ class Agent:
         function_args = data[idx]['function_args']
 
         while execute_function == "True":
-            print("\nInternal response: ", str(data[idx]))
-            print("\nNow executing function.\n")
+            print("\n--------Internal response:--------\n ", str(data[idx]))
+            print("\n--------Now executing function:  ", function_name, "--------\n")
             function_response = run_function(function, function_name, function_args)
+            print("\n--------Function Response:--------\n ",function_response)
             response = self.chat_session.send_message(
                 f"Here is the response from your function execution: <SYSTEM_INPUT>{str(function_response)}</SYSTEM_INPUT>", role='user'
             )

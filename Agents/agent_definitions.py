@@ -241,9 +241,10 @@ def get_ScheduleAgent(model):
                     
                     Use the tools available to you to: 
                     1. Find the 'Employee Name' with the proper license by checking the 'Specialization' to do the task the user asked for. If there are multiple employees that meet the requirement, provide their names to the user and let them know you are proceeding with one of them (select at random).
-                    2. Retrieve the availability of this employee by using their name, e.g. John Smith.  
-                    3. Retrieve the availability of the workshop. 
-                    4. Provide the dates for the next available slots for both the employee and the workshop in the format DD.MM.YYYY. 
+                    2. Retrieve the availability of this employee by using their name, e.g. Jane Doe.  
+                    3. Provide the dates for the next three available 1 hour slots for the employee in the format DD.MM.YYYY HH:MM. 
+
+                    It is of UPMOST importance that you set 'execute_function' to FALSE once you are done calling tools. 
 
                 """
 
@@ -278,8 +279,6 @@ def get_ScheduleAgent(model):
 
                     Args:
                         calendar_instance: A string identifier for the calendar. Valid options are:
-                                            - 'workshop'
-                                            - 'Jane Doe'
                                             - 'John Smith'
 
                     Returns:
