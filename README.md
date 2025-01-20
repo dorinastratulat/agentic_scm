@@ -1,4 +1,6 @@
 # 🤖 Agentic Supply Chain Maintenance (ASCM)
+https://cloudonair.withgoogle.com/events/beyond-chatbots-the-world-of-ai-agents/watch?talk=t1-s1
+
 
 **ASCM** is an application that leverages Large Language Models (LLMs) and the power of agents to streamline and enhance maintenance and logistics processes within a supply chain context.
 
